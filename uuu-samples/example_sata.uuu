@@ -1,0 +1,17 @@
+uuu_version 1.1.16
+
+# please replace below item with real filename
+# @_flash.bin		|  sata bootloader
+
+SDP: boot -f _flash.bin
+# This command will be run when use SPL
+SDPU: delay 1000
+SDPU: write -f _flash.bin -offset 0x57c00
+SDPU: jump
+# This command will be run when ROM support stream mode
+SDPS: boot -f _flash.bin
+
+FB: ucmd setenv fastboot_dev sata
+FB: flash -raw2sparse all _rootfs.sdcard
+FB: flash bootloader _flash.bin
+FB: done

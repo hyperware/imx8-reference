@@ -1,0 +1,18 @@
+uuu_version 1.1.16
+
+# please replace below items with real filename
+# @_flash.bin		|  weim nor bootloader
+
+SDP: boot -f _flash.bin
+# This command will be run when use SPL
+SDPU: write -f _flash.bin -offset 0x57c00
+SDPU: jump
+# This command will be run when ROM support stream mode
+SDPS: boot -f _flash.bin
+
+FB: ucmd protect off ${weim_base} +0x100000
+FB[-t 30000]: ucmd erase ${weim_base} +0x100000
+FB: ucmd setenv fastboot_buffer ${loadaddr}
+FB: download -f _flash.bin
+FB[-t 30000]: ucmd cp.b ${loadaddr} ${weim_uboot} ${fastboot_bytes}
+FB: done

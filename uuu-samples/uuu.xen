@@ -1,0 +1,50 @@
+uuu_version 1.0.1
+
+#Only support buring images to i.MX8QM/QXP SD card larger than 16GB.
+SDP: boot -f _flash.bin
+# This command will be run when use SPL
+SDPU: delay 1000
+SDPU: write -f _flash.bin -offset 0x57c00
+SDPU: jump
+# This command will be run when ROM support stream mode
+SDPS: boot -f _flash.bin
+
+FB: ucmd setenv fastboot_buffer ${loadaddr}
+FB: download -f _Image
+FB: ucmd setenv fastboot_buffer ${fdt_addr}
+FB: download -f _board.dtb
+FB: ucmd setenv fastboot_buffer ${initrd_addr}
+FB: download -f _initramfs.cpio.gz.u-boot
+FB: acmd booti ${loadaddr} ${initrd_addr} ${fdt_addr}
+
+# Format the SD card >= 16GB to 3 partitions.
+FBK: ucmd while [ ! -e /dev/mmcblk1 ]; do sleep 1; echo "wait for /dev/mmcblk1 appear"; done
+FBK: ucmd dd if=/dev/zero of=/dev/mmcblk1 bs=1024 count=1
+FBK: ucmd PARTSTR=$'10M,500M,0c\n600M,7680M,83\n7700M,,83\n' ; echo "$PARTSTR" | sfdisk --force /dev/mmcblk1
+
+FBK: ucmd sync
+FBK: ucp  _flash.bin t:/tmp
+FBK: ucmd dd if=/tmp/_flash.bin of=/dev/mmcblk1 bs=1K seek=32
+FBK: ucmd while [ ! -e /dev/mmcblk1p1 ]; do sleep 1; done
+FBK: ucmd mkfs.vfat /dev/mmcblk1p1
+FBK: ucmd mkdir -p /mnt/mmcblk1p1
+FBK: ucmd mkdir -p /mnt/ext3
+FBK: ucmd mount -t vfat /dev/mmcblk1p1 /mnt/mmcblk1p1
+FBK: ucp  _Image t:/mnt/mmcblk1p1
+#The _board.dtb should be xxx-dom0.dtb
+FBK: ucp  _board.dtb t:/mnt/mmcblk1p1
+FBK: ucp  _xen t:/mnt/mmcblk1p1
+FBK: ucmd umount /mnt/mmcblk1p1
+FBK: ucmd mkfs.ext3 -F -E nodiscard /dev/mmcblk1p2
+FBK: ucmd mount /dev/mmcblk1p2 /mnt/ext3
+FBK: acmd tar -jxv -C /mnt/ext3
+FBK: ucp  _rootfs.tar.bz2 t:-
+FBK: Sync
+FBK: ucmd umount /mnt/ext3
+FBK: ucmd mkfs.ext3 -F -E nodiscard /dev/mmcblk1p3
+FBK: ucmd mount /dev/mmcblk1p3 /mnt/ext3
+FBK: acmd tar -jxv -C /mnt/ext3
+FBK: ucp  _rootfs.tar.bz2 t:-
+FBK: Sync
+FBK: ucmd umount /mnt/ext3
+FBK: DONE

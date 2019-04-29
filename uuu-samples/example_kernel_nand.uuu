@@ -1,0 +1,70 @@
+uuu_version 1.0.1
+
+# Please replace below item with actual name
+# @_flash_fw.bin                | boot loader firmware, for i.MX8QM/QX, it's different from _flash.bin, for all other platforms, it's same as _flash.bin
+# @_flash.bin                   | boot loader file burn to NAND
+# @_Image                       | linux kernel image, zImage for arm32, Image for arm64
+# @_board.dtb                   | board dtb file
+# @_initramfs.cpio.gz.uboot     | initramfs
+# @_tee                         | optee image
+# @_rootfs.tar.bz2              | rootfs
+
+SDP: boot -f _flash_fw.bin
+# This command will be run when use SPL
+SDPU: write -f _flash_fw.bin -offset 0x57c00
+SDPU: jump
+# This command will be run when ROM support stream mode
+SDPS: boot -f _flash_fw.bin
+
+FB: ucmd setenv fastboot_buffer ${loadaddr}
+FB: download -f _Image
+FB: ucmd setenv fastboot_buffer ${fdt_addr}
+FB: download -f _board.dtb
+FB: ucmd setenv fastboot_buffer ${initrd_addr}
+FB: download -f _initramfs.cpio.gz.uboot
+FB: ucmd setenv bootargs ${bootargs} ${mtdparts}
+#FB: ucmd setenv bootargs console=ttymxc3,115200  ${mtdparts}
+FB: acmd ${kboot} ${loadaddr} ${initrd_addr} ${fdt_addr}
+
+FBK: ucmd cat /proc/mtd
+FBK: ucmd cat /proc/mtd | while read dev size erase name; do mtd=${dev:3}; mtd=${mtd%:}; name=${name%\"}; name=${name#\"}; echo export $name=$mtd >> /tmp/mtd.sh; done;
+
+FBK: ucmd chmod 777 /tmp/mtd.sh
+
+FBK: ucmd mount -t debugfs debugfs /sys/kernel/debug
+
+# write boot loader
+FBK: ucmd source /tmp/mtd.sh; flash_erase /dev/mtd${nandboot} 0 0
+FBK: ucp _flash.bin t:/tmp/boot
+FBK: ucmd source /tmp/mtd.sh; cd /tmp; if ! [[ `cat /sys/devices/soc0/soc_id` = *"MX8Q"* ]]; then pad="-x"; fi; kobs-ng init $pad -v --chip_0_device_path=/dev/mtd${nandboot} /tmp/boot
+
+# burn FIT
+FBK: ucmd if [[ `cat /tmp/mtd.sh` = *"nandfit"* ]]; then source /tmp/mtd.sh; flash_erase /dev/mtd${nandfit} 0 0; dd if=/tmp/boot of=/tmp/fit bs=1k skip=351; nandwrite -p /dev/mtd${nandfit} -p /tmp/fit; fi
+
+# burn kernel
+FBK: ucmd source /tmp/mtd.sh; flash_erase /dev/mtd${nandkernel} 0 0
+FBK: ucp _Image t:/tmp/img
+FBK: ucmd source /tmp/mtd.sh; nandwrite -p /dev/mtd${nandkernel} -p /tmp/img
+
+# burn dtb
+FBK: ucmd source /tmp/mtd.sh; flash_erase /dev/mtd${nanddtb} 0 0
+FBK: ucp _board.dtb t:/tmp/dtb
+FBK: ucmd source /tmp/mtd.sh; nandwrite -p /dev/mtd${nanddtb} -p /tmp/dtb
+
+# burn uTee
+FBK: ucmd source /tmp/mtd.sh; flash_erase /dev/mtd${nandtee} 0 0
+FBK: ucp _tee t:/tmp/tee
+FBK: ucmd source /tmp/mtd.sh; nandwrite -p /dev/mtd${nandtee} -p /tmp/tee
+
+# burn rootfs
+FBK: ucmd source /tmp/mtd.sh; flash_erase /dev/mtd${nandrootfs} 0 0
+FBK: ucmd source /tmp/mtd.sh; ubiattach /dev/ubi_ctrl -m ${nandrootfs}
+FBK: ucmd source /tmp/mtd.sh; ubimkvol /dev/ubi0 -Nnandrootfs -m
+FBK: ucmd source /tmp/mtd.sh; mkdir -p /mnt/mtd
+FBK: ucmd source /tmp/mtd.sh; mount -t ubifs ubi0:nandrootfs /mnt/mtd
+FBK: acmd export EXTRACT_UNSAFE_SYMLINKS=1; tar -jx -C /mnt/mtd
+FBK: ucp _rootfs.tar.bz2 t:-
+FBK: sync
+FBK: ucmd umount /mnt/mtd
+
+FBK: done
